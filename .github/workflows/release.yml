@@ -1,0 +1,72 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build and Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Get the version
+        id: get_version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Build WASM binary
+        run: |
+          mkdir -p bin
+          cd plugin
+          GOOS=wasip1 GOARCH=wasm go build -o ../bin/sqlc-gen-php.wasm main.go
+
+      - name: Extract WASM SHA256
+        id: wasm_sha
+        run: |
+          WASM_SHA=$(sha256sum bin/sqlc-gen-php.wasm | awk '{print $1}')
+          echo "wasm_sha256=${WASM_SHA}" >> $GITHUB_OUTPUT
+          echo "WASM SHA256: ${WASM_SHA}"
+
+      - name: Create Release Notes
+        id: release_notes
+        run: |
+          cat > release_notes.md << 'EOF'
+          ## Installation
+
+          Add to your `sqlc.yaml`:
+
+          ```yaml
+          version: '2'
+          plugins:
+          - name: php
+            wasm:
+              url: https://github.com/${{ github.repository }}/releases/download/${{ steps.get_version.outputs.VERSION }}/sqlc-gen-php.wasm
+              sha256: ${{ steps.wasm_sha.outputs.wasm_sha256 }}
+          ```
+
+          ## What's Included
+
+          - `sqlc-gen-php.wasm` - WebAssembly binary for use with sqlc
+          EOF
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: bin/sqlc-gen-php.wasm
+          body_path: release_notes.md
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
